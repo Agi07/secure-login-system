@@ -52,6 +52,17 @@ def get_user(username: str, db_file: str = DB_FILE):
             "SELECT * FROM users WHERE username = ?", (username,)
         ).fetchone()
 
+def update_attempts(
+    username: str, failed_attempts: int, locked_until: float, db_file: str = DB_FILE
+) -> None:
+    """Save the failed-login counter and the lock time for a user."""
+    with closing(get_connection(db_file)) as conn:
+        with conn:
+            conn.execute(
+                "UPDATE users SET failed_attempts = ?, locked_until = ? WHERE username = ?",
+                (failed_attempts, locked_until, username),
+            )
+
 
 if __name__ == "__main__":
     import os
