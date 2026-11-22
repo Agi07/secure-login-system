@@ -224,3 +224,5 @@ __marimo__/
 
 users.db
 *.db
+
+security.log

@@ -4,6 +4,7 @@ import time
 
 from auth import hash_password, verify_password
 from database import DB_FILE, add_user, get_user, init_db, update_attempts
+from security_log import clean, logger
 from validation import validate_password, validate_username
 
 MAX_ATTEMPTS = 5      # wrong passwords allowed before the account locks
@@ -19,15 +20,19 @@ def register_user(username: str, password: str, db_file: str = DB_FILE):
 
     problems = validate_username(username)
     if problems:
+        logger.info("REGISTER_REJECTED invalid username=%r", clean(username))
         return False, "Username must be " + "; ".join(problems) + "."
 
     problems = validate_password(password, username)
     if problems:
+        logger.info("REGISTER_REJECTED weak password username=%s", username)
         return False, "Password needs: " + ", ".join(problems) + "."
 
     if not add_user(username, hash_password(password), db_file):
+        logger.info("REGISTER_REJECTED username taken username=%s", username)
         return False, "That username is already taken."
 
+    logger.info("REGISTER_OK username=%s", username)
     return True, "Account created."
 
 
@@ -35,28 +40,36 @@ def login_user(username: str, password: str, db_file: str = DB_FILE, now=None):
     """Try to log in. Returns (success, message)."""
     now = time.time() if now is None else now
     username = username.strip()
+    safe_name = clean(username)
     user = get_user(username, db_file)
 
     if user is None:
         # Do the same slow hashing work, so an attacker cannot tell
         # from the response time whether the username exists.
         verify_password(password, DUMMY_HASH)
+        logger.warning("LOGIN_FAILED unknown username=%r", safe_name)
         return False, "Invalid username or password."
 
     if user["locked_until"] > now:
         minutes = int((user["locked_until"] - now) // 60) + 1
+        logger.warning("LOGIN_BLOCKED account locked username=%s", username)
         return False, f"Account locked. Try again in about {minutes} minute(s)."
 
     if verify_password(password, user["password_hash"]):
         update_attempts(username, 0, 0, db_file)  # success clears the counter
+        logger.info("LOGIN_OK username=%s", username)
         return True, "Login successful."
 
     attempts = user["failed_attempts"] + 1
     if attempts >= MAX_ATTEMPTS:
         update_attempts(username, 0, now + LOCK_SECONDS, db_file)
+        logger.error("ACCOUNT_LOCKED username=%s after %d failed attempts",
+                     username, attempts)
         return False, "Too many failed attempts. Account locked for 5 minutes."
 
     update_attempts(username, attempts, 0, db_file)
+    logger.warning("LOGIN_FAILED wrong password username=%s attempt=%d",
+                   username, attempts)
     # Same message as an unknown username, on purpose.
     return False, "Invalid username or password."
 
